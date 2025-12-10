@@ -161,7 +161,7 @@ def ProcessSlackJSONFile(filename=None,userids=None):
 
         
     with open(filename, 'r',encoding='utf-8') as file: # Slack JSON's are UTF 8
-        stringstowrite.append(str(filename)+'\n') #put file name at the top of the day
+        stringstowrite.append('\n'+str(filename)+'\n') #put file name at the top of the day
         print(f'\n{filename}\n')
         
         data = json.load(file)
@@ -180,8 +180,23 @@ def ProcessSlackJSONFile(filename=None,userids=None):
             if 'subtype' in message:
                 msg_subtype = message['subtype']
 
-            msg_user = message['user']            
+            if 'user' in message:
+                msg_user = message['user']
+            if 'username' in message:
+                msg_user = message['username']
+                
             text = message['text']
+            # remove double \n to make it look better
+            text = text.replace('\n\n', '\n')
+            # indent for new lines
+            indent = '\n'
+            length = len(ts)
+            i = 0
+            while i < length:
+                indent += ' '
+                i+=1
+                
+            text = text.replace('\n',indent)
             
             # list file names if there are files attached
             if 'files' in message:
@@ -203,9 +218,15 @@ def ProcessSlackJSONFile(filename=None,userids=None):
                     msg_keys = f.keys()
                     
                     if 'ts' in msg_keys:
-                        attach_outstr += ConvertSlackTS(f.get('ts')) + ' - ' + FormatUserstr(f['author_name']) + ': ' + f['text']
+                        attach_outstr += ConvertSlackTS(f.get('ts')) + ' - ' 
+                    if 'title' in msg_keys:
+                        attach_outstr += f.get('title')
+                    if 'author_name' in msg_keys:   
+                        attach_outstr += FormatUserstr(f.get('author_name'))
                     if 'from_url' in msg_keys:
-                        attach_outstr += 'URL' + ' - ' + f.get('from_url') + '\n    ' + f.get('fallback') + '\n    ' + f.get('text')
+                        attach_outstr += 'URL' + ' - ' + f.get('from_url') 
+                    if 'fallback' in msg_keys:
+                        attach_outstr += '\n    ' + f.get('fallback')
             
             # if the message has reactions, include them
             if 'reactions' in message:
@@ -214,7 +235,7 @@ def ProcessSlackJSONFile(filename=None,userids=None):
                 list_reactions = message['reactions']
                     
                 for x in list_reactions:
-                    reacts_stdout = '\n    Reaction name: ' + FormatReactstr(x['name'])
+                    reacts_stdout = '\n    Reaction Name: ' + FormatReactstr(x['name'])
                     reacts_stdout += '\n    Reaction Count: '+ FormatReactstr(str(x['count']))
                     reacts = '\n    Reaction name: ' + x['name']
                     reacts += '\n    Reaction Count: ' + str(x['count'])                        
@@ -247,16 +268,14 @@ def ProcessSlackJSONFile(filename=None,userids=None):
                     reply_text = GetReplyfromTS(messages, x.get('ts'))
                     #remove to prevent duplicates
                     duplicate = GetMessagefromTS(messages, x.get('ts'))
-                    if not duplicate:
-                        print("No duplicate found for a reply\n")
-                    
-                    messages.remove(duplicate)
+                    if duplicate:                    
+                        messages.remove(duplicate)
                     
                     reply_stdoutstr += FormatUserstr(user, 'screen') + reply_text
                     reply_outstr += user + ': ' + reply_text
                         
             # format output
-            out_str = FormatTSstr(ts, 'file') + ': ' + msg_type + ' - ' + msg_subtype + ' ' + msg_user + ': ' + text
+            out_str = FormatTSstr(ts, 'file') + ': ' + msg_type + ' - ' + msg_subtype + ' ' + FormatUserstr(msg_user) + ': ' + text
             if attach_outstr:
                 out_str += attach_outstr
             if files_outstr:
@@ -266,7 +285,7 @@ def ProcessSlackJSONFile(filename=None,userids=None):
             if reply_outstr:
                 out_str += reply_outstr
                 
-            stdout_str = FormatTSstr(ts, 'screen') + msg_type + ' - ' + msg_subtype + FormatUserstr(msg_user) + text            
+            stdout_str = FormatTSstr(ts, 'screen') + msg_type + ' - ' + msg_subtype + FormatUserstr(msg_user, 'screen') + text            
             if attach_outstr:
                 stdout_str += attach_outstr
             if files_outstr:
