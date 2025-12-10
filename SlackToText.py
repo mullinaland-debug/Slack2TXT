@@ -47,16 +47,16 @@ bVerbose = False
 # ConvertSlackTS takes a Slack time stamp and returns a datetime string
 #
 def ConvertSlackTS(timestamp):
-    dt_object = datetime.datetime.fromtimestamp(float(timestamp))
-    return(str(dt_object))
-
+    dt_object = datetime.datetime.fromtimestamp(float(timestamp)) # sometimes Slack exports a float, sometimes it's a string: "1744455814.517349" or 1744455814.517349
+    ts = str(dt_object)
+    return ts
+    
 #
-# GetMSGfromTS() returns message text by matching with the time stamp provided
+# GetReplyfromTSfromTS() returns message text by matching with the time stamp provided
 #
-def GetMSGfromTS(messages=None, ts=None):
+def GetReplyfromTS(messages=None, ts=None):
     if not messages or not ts:
-        print('\nGetMSGfromTS: Missing messages or time stamp.')
-        exit(2)
+        sys.exit('\nGetReplyfromTS: Missing messages or time stamp.')
         
     for msg in messages:
         if msg["ts"] == ts:
@@ -65,19 +65,17 @@ def GetMSGfromTS(messages=None, ts=None):
     return '' # NULL String
     
 #
-# GetReplyfromTSfromTS() returns message text by matching with the time stamp provided, and deletes the message to prevent double printing
+# GetMessagefromTS() returns message obj by matching with the time stamp provided
 #
-def GetReplyfromTS(messages=None, ts=None):
+def GetMessagefromTS(messages=None, ts=None):
     if not messages or not ts:
         sys.exit('\nGetReplyfromTS: Missing messages or time stamp.')
         
     for msg in messages:
         if msg["ts"] == ts:
-            text = msg["text"]
-            del msg
-            return text
-            
-    return '' # NULL String
+            return msg
+    
+    return None            
 
 #
 # GetFileNames() returns a list of JSON filenames in the folder, but will omit users.json if present
@@ -85,7 +83,6 @@ def GetReplyfromTS(messages=None, ts=None):
 def GetFileNames(folder_name=None):
     filenamelist = []
     cwd = os.getcwd()
-    print('GetFileNames: cwd is ' + cwd)
     
     # No folder specified
     if folder_name:
@@ -120,23 +117,28 @@ def InsertRealName(text, userids):
     return text
 
 #
-# FormatTSstr() sets the color control code for timestamps. It takes a timestamp as a string and returns a string
+# FormatTSstr() sets the color control code for timestamps. It takes a timestamp as a string, output mode and returns a string
 #
-def FormatTSstr(timestamp=None):
+def FormatTSstr(timestamp=None, out='file'):
     if not timestamp:
         sys.exit("FormatTSstr(): No timestamp provided.")
-    
-    
-    return '\x1b[1m\x1b[33m' + timestamp + '\x1b[0m: '
+        
+    if out == 'screen':
+        return '\x1b[1m\x1b[33m[' + timestamp + ']\x1b[0m: '
+        
+    return '[' + timestamp + ']'
 
 #
 # FormatUserstr() sets the color control code for user names. It takes a user name and returns a string
 #
-def FormatUserstr(user=None):
+def FormatUserstr(user=None, out='file'):
     if not user:
         sys.exit("FormatUserstr(): No user name provided.")
     
-    return ' \x1b[36m' + user + '\x1b[0m: '
+    if out == 'screen':
+        return ' \x1b[36m<' + user + '>\x1b[0m '
+    
+    return '<' + user + '>'
     
 #
 # FormatReactstr() sets the color control code for reactions. It takes a string and returns a string
@@ -152,10 +154,9 @@ def FormatReactstr(react=None):
 #
 def ProcessSlackJSONFile(filename=None,userids=None):
     if not filename:
-        print('ProcessSlackJSONFile: No file specified.')
-        exit(1) # bail out with an error
+        sys.exit('ProcessSlackJSONFile: No file specified.')
         
-    SlackJSONData = [] # empty array for the file date
+    SlackJSONData = []
     stringstowrite = []
 
         
@@ -170,6 +171,7 @@ def ProcessSlackJSONFile(filename=None,userids=None):
             reacts = [] # no reactions yet
             reply_outstr = [] # no replies yet
             files_outstr = str() # no files uploaded
+            attach_outstr = str()
             msg_subtype = 'NO SUBTYPE' # not all messages have subtypes
             ts = ConvertSlackTS(message["ts"])
             ts = str(ts)
@@ -184,11 +186,27 @@ def ProcessSlackJSONFile(filename=None,userids=None):
             # list file names if there are files attached
             if 'files' in message:
                 msg_subtype = 'FILE UPLOAD'
-                text = text + ' <File upload>'
                 
                 for f in message['files']:
-                    files_outstr += '\n    File: ' + ConvertSlackTS(f['timestamp']) + ' - ' + f['name'] + ' of type ' + f['pretty_type']
+                    if f['mode'] == 'tombstone':
+                        files_outstr += '\n    File: DELETED'
+                        continue
+                        
+                    files_outstr += '\n    File: ' + FormatTSstr(ConvertSlackTS(f['timestamp'])) + ' - ' + f['name'] + ' of type ' + f['pretty_type']
 
+            # process attachments
+            if 'attachments' in message:
+                msg_subtype = 'ATTACHMENTS'                
+                attach_outstr = '\n    Attachment: '
+                
+                for f in message['attachments']:
+                    msg_keys = f.keys()
+                    
+                    if 'ts' in msg_keys:
+                        attach_outstr += ConvertSlackTS(f.get('ts')) + ' - ' + FormatUserstr(f['author_name']) + ': ' + f['text']
+                    if 'from_url' in msg_keys:
+                        attach_outstr += 'URL' + ' - ' + f.get('from_url') + '\n    ' + f.get('fallback') + '\n    ' + f.get('text')
+            
             # if the message has reactions, include them
             if 'reactions' in message:
                 react_outstr = str()
@@ -196,40 +214,51 @@ def ProcessSlackJSONFile(filename=None,userids=None):
                 list_reactions = message['reactions']
                     
                 for x in list_reactions:
-                    reacts_stdout = '\x1b[0m\n    Reaction name: ' + FormatReactstr(x['name'])
+                    reacts_stdout = '\n    Reaction name: ' + FormatReactstr(x['name'])
                     reacts_stdout += '\n    Reaction Count: '+ FormatReactstr(str(x['count']))
                     reacts = '\n    Reaction name: ' + x['name']
                     reacts += '\n    Reaction Count: ' + str(x['count'])                        
+                    
                     # get user names if  can
                     for y in x['users']:
                         current_name = InsertRealName(y,userids)
                         if not current_name:
                             current_name = y
-                        reacts_stdout += '\n        ' + FormatUserstr(current_name)
+                        reacts_stdout += '\n        ' + FormatUserstr(current_name, 'screen')
+                        reacts += '\n        ' + FormatUserstr(current_name)
+                        
                     react_stdoutstr += reacts_stdout
                     react_outstr += reacts                      
                 
             # Handle any replies
             if 'replies' in message:
                 reply_outstr = '\nReply thread timestamp: ' + FormatTSstr(ConvertSlackTS(message['thread_ts'])) + '\nReply Count: ' + str(message['reply_count'])
-                reply_stdoutstr = '\nReply thread timestamp: \x1b[1m\x1b[33m' + ConvertSlackTS(message['thread_ts']) + '\x1b[0m\nReply Count: ' + str(message['reply_count'])
+                reply_stdoutstr = '\nReply thread timestamp: ' + FormatTSstr(ConvertSlackTS(message['thread_ts']),'screen') + '\nReply Count: ' + str(message['reply_count'])
                 list_replies = message['replies']
                 ts_str = str()
                     
                 for x in list_replies:
                     ts = x.get('ts')
                     ts = ConvertSlackTS(ts)
-                    reply_stdoutstr += '\n    \x1b[1m\x1b[33m' + ts + '\x1b[0m '
-                    reply_outstr += '\n    ' + ts + ' '
+                    reply_stdoutstr += '\n    ' + FormatTSstr(ts,'screen')
+                    reply_outstr += '\n    ' + FormatTSstr(ts)
                     user = x.get('user')
                     
                     reply_text = GetReplyfromTS(messages, x.get('ts'))
+                    #remove to prevent duplicates
+                    duplicate = GetMessagefromTS(messages, x.get('ts'))
+                    if not duplicate:
+                        print("No duplicate found for a reply\n")
                     
-                    reply_stdoutstr += FormatTSstr(ts) + FormatUserstr(user) + reply_text
+                    messages.remove(duplicate)
+                    
+                    reply_stdoutstr += FormatUserstr(user, 'screen') + reply_text
                     reply_outstr += user + ': ' + reply_text
                         
             # format output
-            out_str = ts + ': ' + msg_type + ' - ' + msg_subtype + ' ' + msg_user + ': ' + text
+            out_str = FormatTSstr(ts, 'file') + ': ' + msg_type + ' - ' + msg_subtype + ' ' + msg_user + ': ' + text
+            if attach_outstr:
+                out_str += attach_outstr
             if files_outstr:
                 out_str += files_outstr
             if reacts:
@@ -237,7 +266,9 @@ def ProcessSlackJSONFile(filename=None,userids=None):
             if reply_outstr:
                 out_str += reply_outstr
                 
-            stdout_str = FormatTSstr(ts) + msg_type + ' - ' + msg_subtype + FormatUserstr(msg_user) + text            
+            stdout_str = FormatTSstr(ts, 'screen') + msg_type + ' - ' + msg_subtype + FormatUserstr(msg_user) + text            
+            if attach_outstr:
+                stdout_str += attach_outstr
             if files_outstr:
                 stdout_str += files_outstr
             if reacts:
